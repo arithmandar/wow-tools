@@ -1,8 +1,9 @@
 # WoW Data Utilities
 
 Small standalone scripts for preparing and generating World of Warcraft map,
-area-table, and addon-locale data. They are not an automatically chained
-pipeline; run the utility that matches the data you are processing.
+area-table, and addon-locale data, plus a small browser extension for
+collecting links. They are not an automatically chained pipeline; run the
+utility that matches the data you are processing.
 
 ## Requirements
 
@@ -133,6 +134,16 @@ python .\use_local_constants.py ".\MyAddon" --table ALC --write
 
 Review the dry-run output before using `--write`; this script modifies the
 selected Lua files in place.
+
+### Collect links in the browser (Link Collector)
+
+[`link-collector/`](link-collector) is a Chrome (Manifest V3) extension, also
+usable in Edge and Brave, for building a list of link texts and URLs. Load it
+via `chrome://extensions` → Developer mode → **Load unpacked**. Right-click a
+link and choose **Save link text + URL**; repeat for as many links as needed,
+then choose **Export saved links to text file** to download `links.txt` with
+one `text<TAB>URL` line per link. See
+[`link-collector/README.md`](link-collector/README.md) for details.
 
 ## Notes
 
