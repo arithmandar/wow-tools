@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Link Collector",
+  "version": "1.0",
+  "description": "Right-click a link to save its text and URL to a list, then export the list as a text file.",
+  "permissions": ["contextMenus", "storage", "downloads"],
+  "action": { "default_title": "Link Collector" },
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "all_frames": true,
+      "run_at": "document_start"
+    }
+  ]
+}
