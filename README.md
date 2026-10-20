@@ -143,6 +143,25 @@ python .\use_local_constants.py ".\MyAddon" --table ALC --write
 Review the dry-run output before using `--write`; this script modifies the
 selected Lua files in place.
 
+### Convert TaxiNodes positions to Atlas map coordinates
+
+[`map-coords/`](map-coords) holds the tools for placing taxi nodes on Atlas
+maps with the game's own projection (`UiMapAssignment` of the taxi `UiMap`):
+
+- `taxinodes_to_lua.py` converts `TaxiNodes.csv` rows into
+  `BuildTransportMap()` node entries.
+- `uimap_transform.py` prints the `transform` for each taxi map from
+  `UiMap.csv` and `UiMapAssignment.csv`.
+- `compare_coords.py` compares hand-placed coords with the projected
+  positions, to find misplaced or mismatched markers.
+
+```powershell
+python .\map-coords\uimap_transform.py UiMap.csv UiMapAssignment.csv
+python .\map-coords\taxinodes_to_lua.py TaxiNodes.csv --continent 1
+```
+
+See [`map-coords/Readme.md`](map-coords/Readme.md) for the formula and details.
+
 ### Move Atlas map-marker positions between Photoshop and Lua
 
 [`photoshop/`](photoshop) holds three tools that share one Lua marker format
