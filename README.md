@@ -15,8 +15,16 @@ utility that matches the data you are processing.
   python -m pip install Pillow
   ```
 
+- [lupa](https://pypi.org/project/lupa/) is required only by
+  `photoshop/atlas_coords_dump.py`:
+
+  ```powershell
+  python -m pip install lupa
+  ```
+
 - `join-map-tiles.ps1` uses Windows PowerShell/.NET `System.Drawing` and has no
   Python dependency.
+- The `.jsx` scripts in `photoshop/` require Adobe Photoshop.
 - The other Python scripts use only the Python standard library.
 
 Run commands from this directory, or provide paths to the scripts and data
@@ -135,6 +143,25 @@ python .\use_local_constants.py ".\MyAddon" --table ALC --write
 Review the dry-run output before using `--write`; this script modifies the
 selected Lua files in place.
 
+### Move Atlas map-marker positions between Photoshop and Lua
+
+[`photoshop/`](photoshop) holds three tools that share one Lua marker format
+(`{ "A", 10001, 271, 182 }`, X / Y = top-left of the text on the 512x512 map):
+
+- `psd_text_extract.jsx` exports the visible text layers of a PSD as a marker
+  table.
+- `psd_text_import.jsx` does the reverse and creates text layers in a PSD from
+  a marker table.
+- `atlas_coords_dump.py` dumps the coords an Atlas module builds at load time,
+  for example Atlas Transportation taxi nodes generated from TaxiNodes world
+  positions, so they can be imported into the PSD while drawing routes.
+
+```powershell
+python .\photoshop\atlas_coords_dump.py "..\Atlas-Transportation" --client forever --map TransAllianceEast_Forever --out ".\out"
+```
+
+See [`photoshop/Readme.md`](photoshop/Readme.md) for details.
+
 ### Collect links in the browser (Link Collector)
 
 [`link-collector/`](link-collector) is a Chrome (Manifest V3) extension, also
@@ -148,6 +175,7 @@ one `text<TAB>URL` line per link. See
 ## Notes
 
 - These scripts are independent command-line helpers; their outputs are not
-  automatically passed between tools.
+  automatically passed between tools. The `photoshop/` tools share a file
+  format, but each one is still run by hand.
 - Check the output paths before running a tool if you need to preserve files
   from an earlier run.
