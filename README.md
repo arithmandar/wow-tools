@@ -66,6 +66,27 @@ PowerShell example:
 The dimensions default to 15 columns by 10 rows in both scripts. The output
 must have a `.png` extension. An existing output file may be overwritten.
 
+### Stitch WMO minimap tiles by group
+
+`join-wmo-minimap-groups.py` handles exported WMO minimap tiles named
+`<wmo>_<group>_<a>_<b>.png` (for example,
+`9mal_maldraxxus_citadel01_001_01_00.png`). It groups tiles by WMO name and
+three-digit group number, then writes one stitched PNG per group plus an
+`_overview.png` sheet showing every group of that WMO, labelled. Missing tiles
+are left transparent. Requires Pillow.
+
+Groups are not positioned relative to each other; that would need WMO group
+bounding boxes. Use the output as a starting point for manual assembly.
+
+```powershell
+python .\join-wmo-minimap-groups.py ".\world\minimaps\wmo\expansion08\maldraxxus"
+python .\join-wmo-minimap-groups.py ".\maldraxxus" --filter tunnels -o ".\out"
+```
+
+By default the first tile index is the column and the second is the row, with
+row 0 at the top. This was not verified against every build; if a known group
+looks transposed or mirrored, add `--swap-axes`, `--flip-x`, or `--flip-y`.
+
 ### Convert an AreaTable CSV to Lua
 
 `csv_to_lua_area_table.py` reads the first column as the area ID and the third
