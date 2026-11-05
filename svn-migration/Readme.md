@@ -24,21 +24,49 @@ commit, which can be a tag instead of trunk.
 
 Every stage can be run again safely.
 
+## Folder layout and settings
+
+Both scripts expect a layout like this. You can run them from any folder, e.g.
+`C:\Work\GitRepos\wow-tools\svn-migration`:
+
+```text
+C:\Work\GitRepos\                  <- repos root
+├── authors.txt                      <- git-svn authors file
+├── wow-tools\svn-migration\         <- these scripts
+├── Atlas\                           <- local clones (new or from the old script)
+└── WorldMapTrackingEnhanced\
+```
+
+The defaults are set at the top of `svn_migration.py`, and `svn_backfill.py`
+uses the same ones:
+
+```python
+DEFAULT_REPOS_ROOT = Path(r"C:\Work\GitRepos")
+AUTHORS_FILE_NAME = "authors.txt"
+```
+
+| Setting | Default | Override |
+| --- | --- | --- |
+| Repos root (new clones go here; old clones are looked up here) | `C:\Work\GitRepos` | `--repos-root D:\Repos` |
+| Authors file | `<repos root>\authors.txt`, then `authors.txt` next to the script | `--authors D:\path\authors.txt` |
+
 ## Requirements
 
 - Python 3.9+
 - Git with `git svn` (included in Git for Windows; on Linux install `git-svn`)
 - [GitHub CLI](https://cli.github.com/) (`gh`), logged in. Needed for the
   workflow guard and `--create-repo`.
-- `authors.txt` next to the script (copy `authors.txt.example`). Git ignores
-  this file.
+- `authors.txt` in the repos root (see `authors.txt.example`). An
+  `authors.txt` next to the script also works, and Git ignores it there.
 
 ## Usage
 
 New migration (create the GitHub repo and run all stages):
 
 ```powershell
-python .\svn-migration\svn_migration.py https://repos.curseforge.com/wow/world-map-tracking-enhanced/ WorldMapTrackingEnhanced --create-repo --stage all
+cd C:\Work\GitRepos\wow-tools\svn-migration
+python .\svn_migration.py https://repos.curseforge.com/wow/world-map-tracking-enhanced/ WorldMapTrackingEnhanced --create-repo --stage all
+# -> clone in C:\Work\GitRepos\WorldMapTrackingEnhanced, authors from C:\Work\GitRepos\authors.txt
 ```
 
 Without `--stage` the script asks which stages to run (`1`-`4`, combinations
@@ -53,11 +81,19 @@ still has every SVN tag and branch as git-svn refs. Its commits are exactly the
 ones on GitHub, so no authors file or re-clone is needed.
 
 ```powershell
-# 1. preview: lists the tags/branches that would be created and pushed
-python .\svn-migration\svn_backfill.py D:\path\to\Atlas --dry-run
-# 2. do it
-python .\svn-migration\svn_backfill.py D:\path\to\Atlas
+cd C:\Work\GitRepos\wow-tools\svn-migration
+# preview one repo (C:\Work\GitRepos\Atlas)
+python .\svn_backfill.py Atlas --dry-run
+# do it
+python .\svn_backfill.py Atlas
+# several repos, or every git-svn clone in the repos root
+python .\svn_backfill.py Atlas Atlas-Legion Atlas-Cataclysm
+python .\svn_backfill.py --all --dry-run
 ```
+
+A repo name means a folder in the repos root. Absolute paths also work. With
+several repos, each one is checked and confirmed separately, and a summary is
+printed at the end.
 
 `svn_backfill.py` imports helpers from `svn_migration.py`, so keep both files
 in the same folder.
@@ -81,6 +117,8 @@ refs under `refs/remotes/origin/` are not affected.
 
 | Option | Meaning |
 | --- | --- |
+| `--all` | Process every git-svn clone in the repos root |
+| `--repos-root` / `--authors` | Override the defaults above |
 | `--dry-run` | Show what would happen, change nothing |
 | `--svn-fetch` (`--authors FILE`) | Run `git svn fetch` first to pick up SVN revisions made after the migration |
 | `--remote` / `--remote-url` | Remote or URL to push to (default: the clone's `origin`) |
@@ -92,7 +130,7 @@ If the old clone folder is gone, re-clone with `svn_migration.py` instead and
 use the same `authors.txt` as the first migration so the commit hashes match:
 
 ```powershell
-python .\svn-migration\svn_migration.py https://repos.curseforge.com/wow/atlas/ Atlas --stage all --dry-run
+python .\svn_migration.py https://repos.curseforge.com/wow/atlas/ Atlas --stage all --dry-run
 ```
 
 ### Options
@@ -101,8 +139,8 @@ python .\svn-migration\svn_migration.py https://repos.curseforge.com/wow/atlas/ 
 | --- | --- |
 | `--stage clone convert push verify \| all` | Stages to run |
 | `--owner` | GitHub owner (default `arithmandar`) |
-| `--workdir` | Folder for the local clone (default: current folder) |
-| `--authors` / `--no-authors` | Authors file (default `authors.txt` next to the script) |
+| `--repos-root` | Folder for the local clone (default `C:\Work\GitRepos`; `--workdir` still works) |
+| `--authors` / `--no-authors` | Authors file (default: see the settings above) |
 | `--prefix` | git-svn ref prefix (default `svn/`) |
 | `--remote` / `--remote-url` | Remote name (default `github`) and push URL override |
 | `--create-repo` | Create the GitHub repo (private) if it does not exist |

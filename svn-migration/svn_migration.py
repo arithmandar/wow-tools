@@ -37,6 +37,19 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+
+# ---------------------------------------------------------------------------
+# Settings: edit these to match your machine. Command-line options override them.
+# ---------------------------------------------------------------------------
+# Folder that holds all local Git repositories. New SVN clones are created here
+# (<repos root>\<git_name>) and svn_backfill.py looks for old clones here.
+#   override: --repos-root
+DEFAULT_REPOS_ROOT = Path(r"C:\Work\GitRepos")
+# git-svn authors file. Searched in this order when --authors is not given:
+#   <repos root>\authors.txt, then authors.txt next to this script.
+#   override: --authors
+AUTHORS_FILE_NAME = "authors.txt"
+# ---------------------------------------------------------------------------
 DEFAULT_OWNER = "arithmandar"
 DEFAULT_PREFIX = "svn/"
 DEFAULT_REMOTE = "github"
@@ -159,7 +172,7 @@ def stage_clone(cfg: Config) -> None:
     else:
         if repo.exists() and any(repo.iterdir()):
             raise MigrationError(f"{repo} exists and is not a git-svn clone. "
-                                 "Remove it or choose another --workdir.")
+                                 "Remove it or choose another --repos-root.")
         cmd = ["git", "svn", "clone", cfg.svn_url, "--stdlayout",
                f"--prefix={cfg.prefix}"]
         if cfg.authors:
@@ -514,6 +527,43 @@ def default_git_name(svn_url: str) -> str:
     return "-".join(part.capitalize() for part in slug.split("-")) or slug
 
 
+def add_location_args(p: argparse.ArgumentParser) -> None:
+    """--repos-root / --authors, shared with svn_backfill.py."""
+    p.add_argument("--repos-root", "--workdir", dest="repos_root", type=Path,
+                   help=f"Folder that holds your local Git repos (default: {DEFAULT_REPOS_ROOT})")
+    p.add_argument("--authors", type=Path,
+                   help=f"git-svn authors file (default: <repos root>\\{AUTHORS_FILE_NAME}, "
+                        f"then {AUTHORS_FILE_NAME} next to this script)")
+
+
+def resolve_repos_root(value: Path | None) -> Path:
+    root = (value or DEFAULT_REPOS_ROOT).expanduser().resolve()
+    if not root.is_dir():
+        raise MigrationError(
+            f"Repos root not found: {root}\n"
+            "Pass --repos-root, or change DEFAULT_REPOS_ROOT at the top of svn_migration.py.")
+    return root
+
+
+def find_authors(value: Path | None, repos_root: Path, required: bool) -> Path | None:
+    if value:
+        path = value.expanduser()
+        if not path.is_absolute():
+            # A bare name like "authors.txt" means the one in the repos root.
+            path = (Path.cwd() / path) if (Path.cwd() / path).is_file() else repos_root / path
+        if not path.is_file():
+            raise MigrationError(f"Authors file not found: {path}")
+        return path.resolve()
+    for candidate in (repos_root / AUTHORS_FILE_NAME, SCRIPT_DIR / AUTHORS_FILE_NAME):
+        if candidate.is_file():
+            return candidate.resolve()
+    if required:
+        raise MigrationError(
+            f"Authors file not found in {repos_root} or {SCRIPT_DIR}.\n"
+            "Create authors.txt (see authors.txt.example), pass --authors, or --no-authors.")
+    return None
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Migrate an SVN repository (trunk, branches and tags) to GitHub.",
@@ -523,7 +573,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "  python svn_migration.py https://repos.curseforge.com/wow/world-map-tracking-enhanced/ "
             "WorldMapTrackingEnhanced\n"
             "  python svn_migration.py https://repos.curseforge.com/wow/atlas/ Atlas --stage convert push verify\n"
-            "  python svn_migration.py https://repos.curseforge.com/wow/atlas/ Atlas --stage all --dry-run\n"))
+            "  python svn_migration.py https://repos.curseforge.com/wow/atlas/ Atlas --stage all --dry-run\n"
+            "  python svn_migration.py https://repos.curseforge.com/wow/atlas/ Atlas --repos-root D:\\Repos\n"))
     p.add_argument("svn_url", help="SVN repository root (the folder containing trunk/branches/tags)")
     p.add_argument("git_name", nargs="?",
                    help="GitHub repository name and local folder name "
@@ -531,10 +582,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--stage", nargs="+", choices=STAGES + ("all",),
                    help="Stage(s) to run. Without this option you are asked interactively.")
     p.add_argument("--owner", default=DEFAULT_OWNER, help=f"GitHub owner (default: {DEFAULT_OWNER})")
-    p.add_argument("--workdir", type=Path, default=Path.cwd(),
-                   help="Folder where the local clone is created (default: current folder)")
-    p.add_argument("--authors", type=Path, default=SCRIPT_DIR / "authors.txt",
-                   help="git-svn authors file (default: authors.txt next to this script)")
+    add_location_args(p)
     p.add_argument("--no-authors", action="store_true",
                    help="Clone without an authors file (SVN user names stay as-is)")
     p.add_argument("--prefix", default=DEFAULT_PREFIX,
@@ -559,15 +607,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def build_config(args: argparse.Namespace) -> Config:
     git_name = args.git_name or default_git_name(args.svn_url)
     prefix = args.prefix if args.prefix.endswith("/") else args.prefix + "/"
-    authors: Path | None = None
-    if not args.no_authors:
-        authors = args.authors.resolve()
-        if not authors.is_file():
-            raise MigrationError(
-                f"Authors file not found: {authors}\n"
-                "Create it (see authors.txt.example) or pass --no-authors.")
-    workdir = args.workdir.resolve()
-    workdir.mkdir(parents=True, exist_ok=True)
+    workdir = resolve_repos_root(args.repos_root)
+    authors = None if args.no_authors else find_authors(args.authors, workdir, required=True)
     return Config(
         svn_url=args.svn_url,
         git_name=git_name,
@@ -609,6 +650,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         cfg = build_config(args)
         info(f"SVN repository : {cfg.svn_url}\n"
+             f"Repos root     : {cfg.workdir}\n"
              f"Local clone    : {cfg.repo}\n"
              f"GitHub         : {cfg.remote_url}\n"
              f"Authors file   : {cfg.authors or '(none)'}\n"

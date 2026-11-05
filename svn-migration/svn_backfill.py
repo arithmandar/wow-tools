@@ -19,8 +19,14 @@ It does NOT touch your current branch, ``main``, the working tree, or any
 commit already on GitHub, and it never force-pushes. If you kept developing
 in that folder, your work is safe.
 
-Usage:
-    python svn_backfill.py <path-to-old-clone> [--dry-run]
+Usage (run from anywhere, e.g. C:\\Work\\GitRepos\\wow-tools\\svn-migration):
+    python svn_backfill.py Atlas --dry-run        # -> <repos root>\\Atlas
+    python svn_backfill.py Atlas Atlas-Legion     # several clones
+    python svn_backfill.py --all --dry-run        # every git-svn clone in the repos root
+    python svn_backfill.py D:\\Other\\Clone        # absolute paths work too
+
+The repos root defaults to DEFAULT_REPOS_ROOT in svn_migration.py
+(C:\\Work\\GitRepos); override it with --repos-root.
 
 Run ``python svn_backfill.py --help`` for all options.
 """
@@ -153,8 +159,7 @@ def active_workflows(slug: str) -> list[str]:
 # --------------------------------------------------------------------------- #
 # Main flow
 # --------------------------------------------------------------------------- #
-def backfill(args: argparse.Namespace) -> int:
-    repo: Path = args.repo.resolve()
+def backfill(repo: Path, args: argparse.Namespace) -> int:
     if not (repo / ".git" / "svn").is_dir():
         raise MigrationError(f"{repo} is not a git-svn clone (.git/svn not found).")
 
@@ -165,6 +170,16 @@ def backfill(args: argparse.Namespace) -> int:
     raw_url = git(repo, "config", "--get", f"remote.{args.remote}.url", check=False)
     slug = args.github_repo or github_slug(url) or github_slug(raw_url)
 
+    if not args.no_workflow_guard:
+        if not slug:
+            raise MigrationError(
+                f"Cannot tell which GitHub repository {url} is, so release workflows "
+                "cannot be paused. Pass --github-repo owner/name, or "
+                "--no-workflow-guard if the target is not GitHub.")
+        if shutil.which("gh") is None:
+            raise MigrationError("The GitHub CLI (gh) is needed to pause release workflows "
+                                 "during the push. Install it, or pass --no-workflow-guard.")
+
     info(f"Local clone : {repo}\n"
          f"GitHub      : {url}\n"
          f"SVN layout  : trunk={trunk_ref}  branches={branch_pat}  tags={tag_pat}")
@@ -172,8 +187,9 @@ def backfill(args: argparse.Namespace) -> int:
     if args.svn_fetch:
         info("\nFetching new SVN revisions first (git svn fetch)...")
         cmd = ["git", "svn", "fetch"]
-        if args.authors:
-            cmd.append(f"--authors-file={args.authors.resolve()}")
+        authors = sm.find_authors(args.authors, args.repos_root, required=False)
+        if authors:
+            cmd.append(f"--authors-file={authors}")
         run(cmd, cwd=repo)
 
     # ---- collect SVN tags and branches ------------------------------------ #
@@ -270,20 +286,11 @@ def backfill(args: argparse.Namespace) -> int:
     # ---- push with workflows disabled ------------------------------------- #
     disabled: list[str] = []
     if not args.no_workflow_guard:
-        if not slug:
-            raise MigrationError(
-                f"Cannot tell which GitHub repository {url} is, so release workflows "
-                "cannot be paused. Pass --github-repo owner/name, or "
-                "--no-workflow-guard if the target is not GitHub.")
-        elif shutil.which("gh") is None:
-            raise MigrationError("The GitHub CLI (gh) is needed to pause release workflows "
-                                 "during the push. Install it, or pass --no-workflow-guard.")
-        else:
-            disabled = active_workflows(slug)
-            for wf in disabled:
-                run(["gh", "workflow", "disable", wf, "-R", slug])
-            if disabled:
-                info(f"Temporarily disabled {len(disabled)} workflow(s) on {slug}.")
+        disabled = active_workflows(slug)
+        for wf in disabled:
+            run(["gh", "workflow", "disable", wf, "-R", slug])
+        if disabled:
+            info(f"Temporarily disabled {len(disabled)} workflow(s) on {slug}.")
     try:
         for group in chunks(branch_specs, PUSH_CHUNK):
             run(["git", "push", url, *group], cwd=repo)
@@ -323,22 +330,52 @@ def cleanup(repo: Path) -> None:
         run(["git", "update-ref", "-d", ref], cwd=repo, mutate=False, capture=True, check=False)
 
 
+def find_repos(args: argparse.Namespace) -> list[Path]:
+    root: Path = args.repos_root
+    if args.all:
+        found = sorted(d for d in root.iterdir() if (d / ".git" / "svn").is_dir())
+        if not found:
+            raise MigrationError(f"No git-svn clones found in {root}.")
+        return found
+    if not args.repos:
+        if (Path.cwd() / ".git" / "svn").is_dir():
+            return [Path.cwd()]
+        raise MigrationError("Give one or more repo names (folders in "
+                             f"{root}), a path, or --all.")
+    out = []
+    for name in args.repos:
+        path = name.expanduser()
+        if not path.is_absolute():
+            path = root / path
+        out.append(path.resolve())
+    return out
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Push missing SVN tags/branches from an old git-svn clone to GitHub.",
-        epilog="Example: python svn_backfill.py D:\\SVN_Migration\\Atlas --dry-run")
-    p.add_argument("repo", type=Path, nargs="?", default=Path.cwd(),
-                   help="The old local clone made by SVN_Migration.py (default: current folder)")
+        description="Push missing SVN tags/branches from old git-svn clones to GitHub.",
+        epilog="Examples:\n"
+               "  python svn_backfill.py Atlas --dry-run\n"
+               "  python svn_backfill.py Atlas Atlas-Legion Atlas-Cataclysm\n"
+               "  python svn_backfill.py --all --dry-run\n"
+               "  python svn_backfill.py Atlas --repos-root D:\\Repos",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("repos", type=Path, nargs="*",
+                   help="Old clone(s) made by SVN_Migration.py: a folder name inside the "
+                        "repos root, or an absolute path")
+    p.add_argument("--all", action="store_true",
+                   help="Process every git-svn clone found in the repos root")
+    sm.add_location_args(p)
     p.add_argument("--remote", default="origin",
                    help="Remote that points to GitHub in that clone (default: origin)")
-    p.add_argument("--remote-url", help="Push to this URL instead of the remote's URL")
+    p.add_argument("--remote-url", help="Push to this URL instead of the remote's URL "
+                   "(only with a single repo)")
     p.add_argument("--github-repo", metavar="OWNER/NAME",
                    help="GitHub repository for the workflow guard, if it can't be read "
-                        "from the remote URL")
+                        "from the remote URL (only with a single repo)")
     p.add_argument("--svn-fetch", action="store_true",
                    help="Run `git svn fetch` first to pick up SVN revisions made after the "
-                        "original migration")
-    p.add_argument("--authors", type=Path, help="Authors file for --svn-fetch")
+                        "original migration (uses the authors file)")
     p.add_argument("--no-workflow-guard", action="store_true",
                    help="Do not disable GitHub Actions workflows while pushing")
     p.add_argument("--reenable-delay", type=int, default=30,
@@ -353,13 +390,32 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     sm.DRY_RUN = args.dry_run
     try:
-        return backfill(args)
+        args.repos_root = sm.resolve_repos_root(args.repos_root)
+        repos = find_repos(args)
+        if len(repos) > 1 and (args.remote_url or args.github_repo):
+            raise MigrationError("--remote-url / --github-repo only work with a single repo.")
     except MigrationError as exc:
         print(f"\nERROR: {exc}", file=sys.stderr)
         return 1
-    except KeyboardInterrupt:
-        print("\nInterrupted.", file=sys.stderr)
-        return 130
+
+    results: dict[str, str] = {}
+    for repo in repos:
+        if len(repos) > 1:
+            info("\n" + "=" * 78 + f"\n{repo.name}\n" + "=" * 78)
+        try:
+            code = backfill(repo, args)
+            results[repo.name] = {0: "OK", 1: "cancelled", 2: "INCOMPLETE"}.get(code, str(code))
+        except MigrationError as exc:
+            print(f"\nERROR ({repo.name}): {exc}", file=sys.stderr)
+            results[repo.name] = "ERROR"
+        except KeyboardInterrupt:
+            print("\nInterrupted.", file=sys.stderr)
+            return 130
+    if len(repos) > 1:
+        info("\nSummary:")
+        for name, status in results.items():
+            info(f"  {status:<10} {name}")
+    return 0 if all(v == "OK" for v in results.values()) else 1
 
 
 if __name__ == "__main__":
