@@ -25,8 +25,9 @@ utility that matches the data you are processing.
 - `join-map-tiles.ps1` uses Windows PowerShell/.NET `System.Drawing` and has no
   Python dependency.
 - The `.jsx` scripts in `photoshop/` require Adobe Photoshop.
-- `svn-migration/svn_migration.py` needs Git with `git svn` and the GitHub CLI
-  (`gh`).
+- `svn-migration/` needs Git with `git svn` and the GitHub CLI (`gh`). Local
+  repos default to `C:\Work\GitRepos` (change `DEFAULT_REPOS_ROOT` or pass
+  `--repos-root`).
 - The other Python scripts use only the Python standard library.
 
 Run commands from this directory, or provide paths to the scripts and data
@@ -226,7 +227,9 @@ local clone made by the earlier version of the script. See
 [`svn-migration/Readme.md`](svn-migration/Readme.md) for details.
 
 ```powershell
-python .\svn-migration\svn_migration.py https://repos.curseforge.com/wow/<project>/ <GitHubRepoName> --stage all --dry-run
+cd C:\Work\GitRepos\wow-tools\svn-migration
+python .\svn_migration.py https://repos.curseforge.com/wow/<project>/ <GitHubRepoName> --stage all --dry-run  # new clone in C:\Work\GitRepos
+python .\svn_backfill.py --all --dry-run  # old clones in C:\Work\GitRepos
 ```
 
 ### Collect links in the browser (Link Collector)
