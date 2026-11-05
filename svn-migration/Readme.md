@@ -47,23 +47,52 @@ URL.
 
 ### Adding missing tags to a repo migrated with the old script
 
-Re-clone with the same `authors.txt` as the first migration. The commits come
-out with the same hashes, so the tags attach to the existing GitHub history.
-Check first with `--dry-run`:
+Use `svn_backfill.py`, and run it against the old local clone, i.e. the folder
+where the old `SVN_Migration.py` ran `git svn clone` and `git push`. That clone
+still has every SVN tag and branch as git-svn refs. Its commits are exactly the
+ones on GitHub, so no authors file or re-clone is needed.
+
+```powershell
+# 1. preview: lists the tags/branches that would be created and pushed
+python .\svn-migration\svn_backfill.py D:\path\to\Atlas --dry-run
+# 2. do it
+python .\svn-migration\svn_backfill.py D:\path\to\Atlas
+```
+
+`svn_backfill.py` imports helpers from `svn_migration.py`, so keep both files
+in the same folder.
+
+What it does:
+
+- Reads the git-svn layout from the clone's `.git/config` (the old script used
+  the `origin/` prefix).
+- Stops if SVN trunk is not part of GitHub's `main` history, which would mean
+  the folder is not the clone that was pushed.
+- Creates annotated tags for the missing SVN tags and pushes them along with
+  any SVN branches GitHub doesn't have. GitHub Actions workflows are disabled
+  during the push.
+- Checks GitHub afterwards.
+
+It leaves your current branch, `main`, the working tree and existing GitHub
+commits alone, and never force-pushes. Commits you made in that folder after
+the migration are safe. GitHub branches are fetched into a private
+`refs/svn-backfill/` namespace, which is deleted afterwards, so the git-svn
+refs under `refs/remotes/origin/` are not affected.
+
+| Option | Meaning |
+| --- | --- |
+| `--dry-run` | Show what would happen, change nothing |
+| `--svn-fetch` (`--authors FILE`) | Run `git svn fetch` first to pick up SVN revisions made after the migration |
+| `--remote` / `--remote-url` | Remote or URL to push to (default: the clone's `origin`) |
+| `--github-repo OWNER/NAME` | GitHub repo for the workflow guard if it can't be read from the URL (e.g. an SSH alias) |
+| `--no-workflow-guard` | Do not disable workflows |
+| `-y` | Skip confirmation |
+
+If the old clone folder is gone, re-clone with `svn_migration.py` instead and
+use the same `authors.txt` as the first migration so the commit hashes match:
 
 ```powershell
 python .\svn-migration\svn_migration.py https://repos.curseforge.com/wow/atlas/ Atlas --stage all --dry-run
-python .\svn-migration\svn_migration.py https://repos.curseforge.com/wow/atlas/ Atlas --stage all
-```
-
-The push stage leaves commits added on GitHub after the migration untouched.
-It only adds the missing tags and branches.
-
-If the old clone folder still exists, you can skip the slow clone stage. Pass
-`--prefix origin/`, because the old script used git-svn's default prefix:
-
-```powershell
-python .\svn-migration\svn_migration.py https://repos.curseforge.com/wow/atlas/ Atlas --prefix origin/ --stage convert push verify
 ```
 
 ### Options

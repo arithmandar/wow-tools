@@ -221,7 +221,8 @@ See [`photoshop/Readme.md`](photoshop/Readme.md) for details.
 repository to GitHub with trunk history, all SVN branches and all SVN tags as
 annotated Git tags. Release workflows are disabled during the push so old tags
 don't publish old releases, and a final check confirms everything reached
-GitHub. It also adds missing tags to repositories migrated earlier. See
+GitHub. `svn_backfill.py` pushes the missing tags and branches from an old
+local clone made by the earlier version of the script. See
 [`svn-migration/Readme.md`](svn-migration/Readme.md) for details.
 
 ```powershell
