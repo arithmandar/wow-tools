@@ -102,6 +102,17 @@ python .\csv_to_lua_area_table.py ".\AreaTable.csv"
 If the CSV path is omitted, the script prompts for it. The CSV is expected to
 have the ID in column 1 and the localized area name in column 3.
 
+### Convert an Atlas changelog to Markdown
+
+`changelog_to_md.py` converts an Atlas `ChangeLog.txt` file to Markdown. Pass
+the source text file and destination Markdown file:
+
+```powershell
+python .\changelog_to_md.py ".\ChangeLog.txt" ".\ChangeLog.md"
+```
+
+Run the script without arguments to print its usage.
+
 ### Generate or update locale Lua files
 
 `sync_locale_from_txt.py` uses an addon’s `<Addon>-enUS.lua` file as the
