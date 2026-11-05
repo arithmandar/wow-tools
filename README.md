@@ -25,6 +25,8 @@ utility that matches the data you are processing.
 - `join-map-tiles.ps1` uses Windows PowerShell/.NET `System.Drawing` and has no
   Python dependency.
 - The `.jsx` scripts in `photoshop/` require Adobe Photoshop.
+- `svn-migration/svn_migration.py` needs Git with `git svn` and the GitHub CLI
+  (`gh`).
 - The other Python scripts use only the Python standard library.
 
 Run commands from this directory, or provide paths to the scripts and data
@@ -201,6 +203,19 @@ python .\photoshop\atlas_coords_dump.py "..\Atlas-Transportation" --client forev
 ```
 
 See [`photoshop/Readme.md`](photoshop/Readme.md) for details.
+
+### Migrate an SVN repository to GitHub
+
+[`svn-migration/svn_migration.py`](svn-migration) moves a CurseForge SVN
+repository to GitHub with trunk history, all SVN branches and all SVN tags as
+annotated Git tags. Release workflows are disabled during the push so old tags
+don't publish old releases, and a final check confirms everything reached
+GitHub. It also adds missing tags to repositories migrated earlier. See
+[`svn-migration/Readme.md`](svn-migration/Readme.md) for details.
+
+```powershell
+python .\svn-migration\svn_migration.py https://repos.curseforge.com/wow/<project>/ <GitHubRepoName> --stage all --dry-run
+```
 
 ### Collect links in the browser (Link Collector)
 
