@@ -1,0 +1,6 @@
+# git-svn authors file: one line per SVN user name.
+#   svn_user = Full Name <email>
+# Copy to authors.txt and fill in. Use the SAME mapping as the first migration,
+# otherwise commit hashes change and tags cannot be added to an existing repo.
+arithmandar = Arith Hsu <arithmandar@gmail.com>
+arith = Arith Hsu <arithmandar@gmail.com>
