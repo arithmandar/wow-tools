@@ -170,16 +170,6 @@ def backfill(repo: Path, args: argparse.Namespace) -> int:
     raw_url = git(repo, "config", "--get", f"remote.{args.remote}.url", check=False)
     slug = args.github_repo or github_slug(url) or github_slug(raw_url)
 
-    if not args.no_workflow_guard:
-        if not slug:
-            raise MigrationError(
-                f"Cannot tell which GitHub repository {url} is, so release workflows "
-                "cannot be paused. Pass --github-repo owner/name, or "
-                "--no-workflow-guard if the target is not GitHub.")
-        if shutil.which("gh") is None:
-            raise MigrationError("The GitHub CLI (gh) is needed to pause release workflows "
-                                 "during the push. Install it, or pass --no-workflow-guard.")
-
     info(f"Local clone : {repo}\n"
          f"GitHub      : {url}\n"
          f"SVN layout  : trunk={trunk_ref}  branches={branch_pat}  tags={tag_pat}")
@@ -264,6 +254,38 @@ def backfill(repo: Path, args: argparse.Namespace) -> int:
         info(f"  tag    {spec.split(':')[0][10:]}")
     for spec in branch_specs:
         info(f"  branch {spec.split(':')[1][11:]}")
+    # ---- does anything we push contain workflow files? ------------------- #
+    guard = False
+    if tag_specs or branch_specs:
+        revs = [t for _, t, _ in tags_to_create]
+        revs += [git(repo, "rev-parse", f"{s.split(':')[0]}^{{commit}}") for s in tag_specs
+                 if not any(s == f"refs/tags/{n}:refs/tags/{n}" for n, _, _ in tags_to_create)]
+        revs += [s.split(":")[0] for s in branch_specs]
+        risky = sm.commits_with_workflows(repo, revs)
+        if not risky:
+            info("\nNone of the commits to push contain .github/workflows; no workflow "
+                 "can be triggered, so the workflow guard is not needed (gh not required).")
+        elif args.no_workflow_guard:
+            warn(f"{len(risky)} commit(s) to push contain workflow files, and "
+                 "--no-workflow-guard was given.")
+        else:
+            problem = None
+            if not slug:
+                problem = (f"{len(risky)} commit(s) to push contain .github/workflows, but "
+                           f"{url} is not recognised as a GitHub repository, so workflows "
+                           "cannot be paused. Pass --github-repo owner/name, or "
+                           "--no-workflow-guard.")
+            elif shutil.which("gh") is None:
+                problem = sm.explain_missing_gh(len(risky))
+            if problem and sm.DRY_RUN:
+                warn(problem)
+            elif problem:
+                raise MigrationError(problem)
+            else:
+                guard = True
+                info(f"\n{len(risky)} commit(s) contain workflow files; workflows on {slug} "
+                     "will be paused during the push.")
+
     if not tag_specs and not branch_specs:
         info("\nNothing to do: GitHub already has every SVN tag and branch.")
         cleanup(repo)
@@ -285,7 +307,7 @@ def backfill(repo: Path, args: argparse.Namespace) -> int:
 
     # ---- push with workflows disabled ------------------------------------- #
     disabled: list[str] = []
-    if not args.no_workflow_guard:
+    if guard:
         disabled = active_workflows(slug)
         for wf in disabled:
             run(["gh", "workflow", "disable", wf, "-R", slug])

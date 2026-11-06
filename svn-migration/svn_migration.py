@@ -327,6 +327,29 @@ def gh_available() -> bool:
     return shutil.which("gh") is not None
 
 
+def commits_with_workflows(repo: Path, revs: list[str]) -> list[str]:
+    """Return the revs whose tree contains GitHub Actions workflow files.
+
+    GitHub runs push-triggered workflows from the pushed commit itself, so if
+    none of the pushed tags/branches contain .github/workflows/*, no workflow
+    can be triggered and there is nothing to pause."""
+    hits = []
+    for rev in dict.fromkeys(revs):
+        files = git(repo, "ls-tree", "-r", "--name-only", rev, "--", ".github/workflows",
+                    check=False)
+        if any(f.endswith((".yml", ".yaml")) for f in files.splitlines()):
+            hits.append(rev)
+    return hits
+
+
+def explain_missing_gh(n_commits: int) -> str:
+    return (f"{n_commits} of the commits to push contain .github/workflows, so a release "
+            "workflow could run and publish old versions. The GitHub CLI (gh) is needed "
+            "to pause workflows during the push.\n"
+            "  Install:  winget install --id GitHub.cli   (then run: gh auth login)\n"
+            "  Or pass --no-workflow-guard if you are sure nothing will be published.")
+
+
 def ensure_github_repo(cfg: Config) -> None:
     if not cfg.create_repo:
         return
@@ -458,17 +481,23 @@ def stage_push(cfg: Config) -> None:
     # tags) so importing old tags does not publish old releases to CurseForge,
     # WoWInterface or GitHub Releases.
     disabled: list[str] = []
-    if cfg.workflow_guard and heads:
-        if not gh_available():
-            raise MigrationError(
-                "The GitHub repository already exists and may have release workflows, "
-                "but the GitHub CLI (gh) is not installed to disable them. Install gh, "
-                "or pass --no-workflow-guard if you are sure no workflow can trigger.")
-        disabled = active_workflows(cfg)
-        for wf in disabled:
-            run(["gh", "workflow", "disable", wf, "-R", cfg.slug])
-        if disabled:
-            info(f"Temporarily disabled {len(disabled)} workflow(s).")
+    if cfg.workflow_guard:
+        revs = [spec.split(":", 1)[0] for spec in branch_specs + tag_specs]
+        risky = commits_with_workflows(repo, revs) if not DRY_RUN or ref_exists(repo, "HEAD") else []
+        if not risky:
+            info("None of the commits to push contain .github/workflows; "
+                 "no workflow can be triggered, guard not needed.")
+        elif not gh_available():
+            if DRY_RUN:
+                warn(explain_missing_gh(len(risky)))
+            else:
+                raise MigrationError(explain_missing_gh(len(risky)))
+        else:
+            disabled = active_workflows(cfg)
+            for wf in disabled:
+                run(["gh", "workflow", "disable", wf, "-R", cfg.slug])
+            if disabled:
+                info(f"Temporarily disabled {len(disabled)} workflow(s).")
 
     try:
         for group in chunks(branch_specs, PUSH_CHUNK):

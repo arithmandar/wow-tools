@@ -54,8 +54,11 @@ AUTHORS_FILE_NAME = "authors.txt"
 
 - Python 3.9+
 - Git with `git svn` (included in Git for Windows; on Linux install `git-svn`)
-- [GitHub CLI](https://cli.github.com/) (`gh`), logged in. Needed for the
-  workflow guard and `--create-repo`.
+- [GitHub CLI](https://cli.github.com/) (`gh`), logged in. It is only needed
+  for `--create-repo`, and for the workflow guard when the commits being pushed
+  contain `.github/workflows/*`. Old SVN tags usually don't, so `gh` is not
+  required for them. To install on Windows:
+  `winget install --id GitHub.cli`, then `gh auth login`.
 - `authors.txt` in the repos root (see `authors.txt.example`). An
   `authors.txt` next to the script also works, and Git ignores it there.
 
@@ -155,6 +158,10 @@ python .\svn_migration.py https://repos.curseforge.com/wow/atlas/ Atlas --stage 
   git-svn refs.
 - If `git svn` reports `Author: xxx not defined in authors.txt`, add the user
   and run the `clone` stage again. It resumes from where it stopped.
-- On GitHub, pushing more than three tags at once does not trigger tag
-  workflows. Tags whose commit has no workflow file don't trigger them either.
-  The workflow guard is an extra safety layer on top of this.
+- GitHub runs a push-triggered workflow from the pushed commit itself. The
+  scripts check every tag and branch they are about to push. If none of those
+  commits contain `.github/workflows/*`, nothing can run, so the guard is
+  skipped. Otherwise they pause the repo's workflows with `gh`, or stop before
+  changing anything if `gh` is missing (`--dry-run` only warns).
+- On GitHub, pushing more than three tags at once does not create tag events
+  either.
