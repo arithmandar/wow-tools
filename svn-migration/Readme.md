@@ -33,8 +33,12 @@ Both scripts expect a layout like this. You can run them from any folder, e.g.
 C:\Work\GitRepos\                  <- repos root
 ├── authors.txt                      <- git-svn authors file
 ├── wow-tools\svn-migration\         <- these scripts
-├── Atlas\                           <- local clones (new or from the old script)
-└── WorldMapTrackingEnhanced\
+├── WorldMapTrackingEnhanced\        <- local clones (new or from the old script)
+├── Atlas\                           <- group folders are fine
+│   ├── Atlas\
+│   └── Atlas-Battle-for-Azeroth\
+└── HandyNotes\
+    └── HandyNotes_Argus\
 ```
 
 The defaults are set at the top of `svn_migration.py`, and `svn_backfill.py`
@@ -70,6 +74,10 @@ New migration (create the GitHub repo and run all stages):
 cd C:\Work\GitRepos\wow-tools\svn-migration
 python .\svn_migration.py https://repos.curseforge.com/wow/world-map-tracking-enhanced/ WorldMapTrackingEnhanced --create-repo --stage all
 # -> clone in C:\Work\GitRepos\WorldMapTrackingEnhanced, authors from C:\Work\GitRepos\authors.txt
+
+# a group folder can be part of the name; the GitHub repo uses the last part
+python .\svn_migration.py https://repos.curseforge.com/wow/atlas-legion/ Atlas\Atlas-Legion --stage all
+# -> clone in C:\Work\GitRepos\Atlas\Atlas-Legion, pushed to github.com/arithmandar/Atlas-Legion
 ```
 
 Without `--stage` the script asks which stages to run (`1`-`4`, combinations
@@ -91,12 +99,28 @@ python .\svn_backfill.py Atlas --dry-run
 python .\svn_backfill.py Atlas
 # several repos, or every git-svn clone in the repos root
 python .\svn_backfill.py Atlas Atlas-Legion Atlas-Cataclysm
+python .\svn_backfill.py Atlas\Atlas HandyNotes\HandyNotes_Argus
 python .\svn_backfill.py --all --dry-run
+python .\svn_backfill.py --all Atlas --dry-run      # only the clones under Atlas\
 ```
 
-A repo name means a folder in the repos root. Absolute paths also work. With
-several repos, each one is checked and confirmed separately, and a summary is
-printed at the end.
+How a repo argument is resolved:
+
+| You type | Used folder |
+| --- | --- |
+| `Atlas\Atlas` | `C:\Work\GitRepos\Atlas\Atlas` (path relative to the repos root) |
+| `Atlas-Battle-for-Azeroth` | Searched by folder name in subfolders: `C:\Work\GitRepos\Atlas\Atlas-Battle-for-Azeroth` |
+| `HandyNotes_Argus` | `C:\Work\GitRepos\HandyNotes\HandyNotes_Argus` |
+| `Atlas` | `C:\Work\GitRepos\Atlas` is only a group folder, so the clone named `Atlas` inside it is used: `Atlas\Atlas` |
+| `D:\Other\Clone` | Absolute paths are used as-is |
+
+If a name matches more than one clone, the script lists them and asks you to
+use the relative path. The search goes 3 levels deep and skips hidden folders
+and anything inside another Git repo (e.g. `wow-tools`).
+
+`--all` processes every git-svn clone in the repos root. `--all Atlas
+HandyNotes` limits it to those group folders. With several repos, each one is
+checked and confirmed separately, and a summary is printed at the end.
 
 `svn_backfill.py` imports helpers from `svn_migration.py`, so keep both files
 in the same folder.

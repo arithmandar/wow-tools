@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import sys
@@ -352,25 +353,94 @@ def cleanup(repo: Path) -> None:
         run(["git", "update-ref", "-d", ref], cwd=repo, mutate=False, capture=True, check=False)
 
 
+SCAN_DEPTH = 3  # how many folder levels below the repos root (or a scope folder) to search
+
+
+def is_svn_clone(path: Path) -> bool:
+    return (path / ".git" / "svn").is_dir()
+
+
+def scan_clones(top: Path, depth: int = SCAN_DEPTH) -> list[Path]:
+    """git-svn clones in `top` and its subfolders, e.g. GitRepos\\Atlas\\Atlas.
+    Does not descend into Git repositories or hidden folders."""
+    found: list[Path] = []
+    if is_svn_clone(top):
+        return [top]
+    if depth <= 0 or (top / ".git").exists():
+        return found
+    try:
+        children = sorted(top.iterdir(), key=lambda p: p.name.lower())
+    except OSError:
+        return found
+    for child in children:
+        if child.is_dir() and not child.name.startswith((".", "$")):
+            found.extend(scan_clones(child, depth - 1))
+    return found
+
+
+def same_name(a: str, b: str) -> bool:
+    return a.lower() == b.lower() if os.name == "nt" else a == b
+
+
+def resolve_repo(name: Path, root: Path, clones: list[Path] | None) -> tuple[Path, list[Path] | None]:
+    """Resolve a repo argument:
+    1. absolute path, or a path under the repos root (Atlas\\Atlas), if it is a clone
+    2. otherwise a clone with that folder name anywhere under the repos root
+       (Atlas -> GitRepos\\Atlas\\Atlas, HandyNotes_Argus -> GitRepos\\HandyNotes\\HandyNotes_Argus)
+    """
+    path = name.expanduser()
+    direct = path if path.is_absolute() else root / path
+    if is_svn_clone(direct) or path.is_absolute():
+        return direct.resolve(), clones
+    if clones is None:
+        clones = scan_clones(root)
+    leaf = path.name
+    matches = [c for c in clones if same_name(c.name, leaf)]
+    if len(matches) == 1:
+        if matches[0].resolve() != direct.resolve():
+            info(f"{name} -> {matches[0]}")
+        return matches[0].resolve(), clones
+    if len(matches) > 1:
+        options = "\n  ".join(str(m.relative_to(root)) for m in matches)
+        raise MigrationError(f"'{name}' matches several clones; use the full relative path:\n  {options}")
+    hint = ""
+    if direct.is_dir():
+        inside = scan_clones(direct)
+        if inside:
+            hint = (f"\n{direct} is a folder with {len(inside)} clone(s); to process all of them use:"
+                    f"\n  python svn_backfill.py --all {name}")
+    raise MigrationError(f"No git-svn clone named '{name}' found under {root}.{hint}")
+
+
 def find_repos(args: argparse.Namespace) -> list[Path]:
     root: Path = args.repos_root
     if args.all:
-        found = sorted(d for d in root.iterdir() if (d / ".git" / "svn").is_dir())
+        # `--all` alone: whole repos root. `--all Atlas HandyNotes`: only those folders.
+        scopes = []
+        for name in args.repos or [Path(".")]:
+            scope = name.expanduser()
+            scope = scope if scope.is_absolute() else root / scope
+            if not scope.is_dir():
+                raise MigrationError(f"Folder not found: {scope}")
+            scopes.append(scope.resolve())
+        found = list(dict.fromkeys(c.resolve() for s in scopes for c in scan_clones(s)))
         if not found:
-            raise MigrationError(f"No git-svn clones found in {root}.")
+            raise MigrationError(f"No git-svn clones found in {', '.join(map(str, scopes))}.")
+        info(f"Found {len(found)} git-svn clone(s):")
+        for c in found:
+            info(f"  {c.relative_to(root) if c.is_relative_to(root) else c}")
         return found
     if not args.repos:
-        if (Path.cwd() / ".git" / "svn").is_dir():
+        if is_svn_clone(Path.cwd()):
             return [Path.cwd()]
         raise MigrationError("Give one or more repo names (folders in "
                              f"{root}), a path, or --all.")
-    out = []
+    out: list[Path] = []
+    clones: list[Path] | None = None
     for name in args.repos:
-        path = name.expanduser()
-        if not path.is_absolute():
-            path = root / path
-        out.append(path.resolve())
-    return out
+        repo, clones = resolve_repo(name, root, clones)
+        out.append(repo)
+    return list(dict.fromkeys(out))
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -379,14 +449,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         epilog="Examples:\n"
                "  python svn_backfill.py Atlas --dry-run\n"
                "  python svn_backfill.py Atlas Atlas-Legion Atlas-Cataclysm\n"
-               "  python svn_backfill.py --all --dry-run\n"
+               "  python svn_backfill.py Atlas\\Atlas HandyNotes\\HandyNotes_Argus\n"
+               "  python svn_backfill.py --all --dry-run           (whole repos root)\n"
+               "  python svn_backfill.py --all Atlas HandyNotes    (only these folders)\n"
                "  python svn_backfill.py Atlas --repos-root D:\\Repos",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("repos", type=Path, nargs="*",
-                   help="Old clone(s) made by SVN_Migration.py: a folder name inside the "
-                        "repos root, or an absolute path")
+                   help="Old clone(s): a folder name (searched in subfolders too, e.g. "
+                        "Atlas-Legion finds Atlas\\Atlas-Legion), a path relative to the "
+                        "repos root (Atlas\\Atlas), or an absolute path. With --all: the "
+                        "folders to search")
     p.add_argument("--all", action="store_true",
-                   help="Process every git-svn clone found in the repos root")
+                   help=f"Process every git-svn clone in the repos root (or in the given "
+                        f"folders), up to {SCAN_DEPTH} levels deep")
     sm.add_location_args(p)
     p.add_argument("--remote", default="origin",
                    help="Remote that points to GitHub in that clone (default: origin)")
@@ -422,14 +497,15 @@ def main(argv: list[str] | None = None) -> int:
 
     results: dict[str, str] = {}
     for repo in repos:
+        label = str(repo.relative_to(args.repos_root)) if repo.is_relative_to(args.repos_root) else str(repo)
         if len(repos) > 1:
-            info("\n" + "=" * 78 + f"\n{repo.name}\n" + "=" * 78)
+            info("\n" + "=" * 78 + f"\n{label}\n" + "=" * 78)
         try:
             code = backfill(repo, args)
-            results[repo.name] = {0: "OK", 1: "cancelled", 2: "INCOMPLETE"}.get(code, str(code))
+            results[label] = {0: "OK", 1: "cancelled", 2: "INCOMPLETE"}.get(code, str(code))
         except MigrationError as exc:
-            print(f"\nERROR ({repo.name}): {exc}", file=sys.stderr)
-            results[repo.name] = "ERROR"
+            print(f"\nERROR ({label}): {exc}", file=sys.stderr)
+            results[label] = "ERROR"
         except KeyboardInterrupt:
             print("\nInterrupted.", file=sys.stderr)
             return 130

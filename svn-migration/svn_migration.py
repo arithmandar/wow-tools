@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import os
 import shutil
 import subprocess
@@ -147,8 +148,13 @@ class Config:
         return self.workdir / self.git_name
 
     @property
+    def github_name(self) -> str:
+        """Last part of git_name: 'Atlas\\Atlas-Legion' -> 'Atlas-Legion'."""
+        return re.split(r"[\\/]", self.git_name.rstrip("\\/"))[-1]
+
+    @property
     def slug(self) -> str:
-        return f"{self.owner}/{self.git_name}"
+        return f"{self.owner}/{self.github_name}"
 
 
 @dataclass
@@ -173,6 +179,7 @@ def stage_clone(cfg: Config) -> None:
         if repo.exists() and any(repo.iterdir()):
             raise MigrationError(f"{repo} exists and is not a git-svn clone. "
                                  "Remove it or choose another --repos-root.")
+        repo.parent.mkdir(parents=True, exist_ok=True)  # e.g. GitRepos\\Atlas\\
         cmd = ["git", "svn", "clone", cfg.svn_url, "--stdlayout",
                f"--prefix={cfg.prefix}"]
         if cfg.authors:
@@ -603,10 +610,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "WorldMapTrackingEnhanced\n"
             "  python svn_migration.py https://repos.curseforge.com/wow/atlas/ Atlas --stage convert push verify\n"
             "  python svn_migration.py https://repos.curseforge.com/wow/atlas/ Atlas --stage all --dry-run\n"
-            "  python svn_migration.py https://repos.curseforge.com/wow/atlas/ Atlas --repos-root D:\\Repos\n"))
+            "  python svn_migration.py https://repos.curseforge.com/wow/atlas/ Atlas --repos-root D:\\Repos\n"
+            "  python svn_migration.py https://repos.curseforge.com/wow/atlas-legion/ Atlas\\Atlas-Legion\n"))
     p.add_argument("svn_url", help="SVN repository root (the folder containing trunk/branches/tags)")
     p.add_argument("git_name", nargs="?",
-                   help="GitHub repository name and local folder name "
+                   help="GitHub repository name and local folder (under the repos root). "
+                        "May include a group folder, e.g. Atlas\\Atlas-Legion -> clone in "
+                        "<repos root>\\Atlas\\Atlas-Legion, GitHub repo Atlas-Legion "
                         "(default: derived from the SVN URL)")
     p.add_argument("--stage", nargs="+", choices=STAGES + ("all",),
                    help="Stage(s) to run. Without this option you are asked interactively.")
@@ -646,7 +656,8 @@ def build_config(args: argparse.Namespace) -> Config:
         authors=authors,
         prefix=prefix,
         remote=args.remote,
-        remote_url=args.remote_url or f"https://github.com/{args.owner}/{git_name}.git",
+        remote_url=args.remote_url or
+        f"https://github.com/{args.owner}/{re.split(r'[\\/]', git_name.rstrip(chr(92) + '/'))[-1]}.git",
         create_repo=args.create_repo,
         workflow_guard=not args.no_workflow_guard,
         reenable_delay=args.reenable_delay,
