@@ -353,33 +353,10 @@ def cleanup(repo: Path) -> None:
         run(["git", "update-ref", "-d", ref], cwd=repo, mutate=False, capture=True, check=False)
 
 
-SCAN_DEPTH = 3  # how many folder levels below the repos root (or a scope folder) to search
-
-
-def is_svn_clone(path: Path) -> bool:
-    return (path / ".git" / "svn").is_dir()
-
-
-def scan_clones(top: Path, depth: int = SCAN_DEPTH) -> list[Path]:
-    """git-svn clones in `top` and its subfolders, e.g. GitRepos\\Atlas\\Atlas.
-    Does not descend into Git repositories or hidden folders."""
-    found: list[Path] = []
-    if is_svn_clone(top):
-        return [top]
-    if depth <= 0 or (top / ".git").exists():
-        return found
-    try:
-        children = sorted(top.iterdir(), key=lambda p: p.name.lower())
-    except OSError:
-        return found
-    for child in children:
-        if child.is_dir() and not child.name.startswith((".", "$")):
-            found.extend(scan_clones(child, depth - 1))
-    return found
-
-
-def same_name(a: str, b: str) -> bool:
-    return a.lower() == b.lower() if os.name == "nt" else a == b
+SCAN_DEPTH = sm.SCAN_DEPTH
+is_svn_clone = sm.is_svn_clone
+scan_clones = sm.scan_clones
+same_name = sm.same_name
 
 
 def resolve_repo(name: Path, root: Path, clones: list[Path] | None) -> tuple[Path, list[Path] | None]:

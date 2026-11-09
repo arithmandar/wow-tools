@@ -82,6 +82,8 @@ def run(cmd: list[str], cwd: Path | None = None, *, mutate: bool = True,
     if mutate and DRY_RUN:
         info(f"[dry-run] {shown}")
         return subprocess.CompletedProcess(cmd, 0, "", "")
+    if cwd is not None and not Path(cwd).is_dir():
+        raise MigrationError(f"Folder not found: {cwd}")
     if not capture:
         info(f"$ {shown}")
     full_env = None
@@ -115,6 +117,35 @@ def ref_exists(repo: Path, ref: str) -> bool:
 def valid_ref_name(repo: Path, ref: str) -> bool:
     return run(["git", "check-ref-format", ref], cwd=repo, mutate=False,
                capture=True, check=False).returncode == 0
+
+
+SCAN_DEPTH = 3  # folder levels below the repos root searched for existing clones
+
+
+def is_svn_clone(path: Path) -> bool:
+    return (path / ".git" / "svn").is_dir()
+
+
+def scan_clones(top: Path, depth: int = SCAN_DEPTH) -> list[Path]:
+    """git-svn clones in `top` and its subfolders (e.g. GitRepos\\Atlas\\Atlas).
+    Does not descend into Git repositories or hidden folders."""
+    if is_svn_clone(top):
+        return [top]
+    if depth <= 0 or (top / ".git").exists():
+        return []
+    try:
+        children = sorted(top.iterdir(), key=lambda p: p.name.lower())
+    except OSError:
+        return []
+    found: list[Path] = []
+    for child in children:
+        if child.is_dir() and not child.name.startswith((".", "$")):
+            found.extend(scan_clones(child, depth - 1))
+    return found
+
+
+def same_name(a: str, b: str) -> bool:
+    return a.lower() == b.lower() if os.name == "nt" else a == b
 
 
 def chunks(items: list[str], size: int):
@@ -683,6 +714,32 @@ def choose_stages(args: argparse.Namespace) -> list[str]:
     return [s for s in STAGES if s in picked]
 
 
+def locate_existing_clone(cfg: Config, stages: list[str]) -> None:
+    """Stages 2-4 need a local clone. If it is not at <repos root>\\<git_name>,
+    look for a clone with the same folder name in subfolders (group folders)."""
+    leaf = cfg.github_name
+    matches = [c for c in scan_clones(cfg.workdir) if same_name(c.name, leaf)]
+    if len(matches) == 1:
+        cfg.git_name = str(matches[0].relative_to(cfg.workdir))
+        info(f"Using the existing clone {cfg.repo}")
+        return
+    if len(matches) > 1:
+        options = "\n  ".join(str(m.relative_to(cfg.workdir)) for m in matches)
+        raise MigrationError(
+            f"Several clones named '{leaf}' exist; pass the one you mean as git_name:\n  {options}")
+    if DRY_RUN:
+        info(f"[dry-run] {cfg.repo} does not exist yet.")
+        return
+    if cfg.repo.exists():
+        problem = f"{cfg.repo} exists but is not a git-svn clone."
+    else:
+        problem = f"Local clone not found: {cfg.repo}"
+    raise MigrationError(
+        f"{problem}\n"
+        f"Stage(s) {', '.join(stages)} work on an existing local clone. "
+        "Run stage 1 (clone) first, or choose 'a' to run all stages.")
+
+
 def main(argv: list[str] | None = None) -> int:
     global DRY_RUN
     args = parse_args(argv)
@@ -702,6 +759,8 @@ def main(argv: list[str] | None = None) -> int:
         if not stages:
             info("No stage selected. Exiting.")
             return 1
+        if "clone" not in stages and not is_svn_clone(cfg.repo):
+            locate_existing_clone(cfg, stages)
         ok = True
         for stage in stages:
             if stage == "clone":
